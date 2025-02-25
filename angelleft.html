@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Angel Slime</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(to bottom, #cce6ff, #ffffff);
+        }
+        .container {
+            position: relative;
+        }
+        .slime {
+            width: 100px;
+            height: 80px;
+            background: white;
+            border-radius: 50% 50% 40% 40%;
+            position: relative;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            animation: float 2s ease-in-out infinite;
+        }
+        .halo {
+            width: 60px;
+            height: 15px;
+            border-radius: 50%;
+            background: rgba(255, 255, 0, 0.7);
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .wings {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background: white;
+            border-radius: 50%;
+            top: 10px;
+            animation: flap 1s infinite alternate;
+        }
+        .left-wing {
+            left: -35px;
+        }
+        .right-wing {
+            right: -35px;
+        }
+        .eyes {
+            position: absolute;
+            top: 40%;
+            left: 30%; /* Shift eyes to the left */
+            display: flex;
+            gap: 5px;
+        }
+        .eye {
+            width: 8px;
+            height: 12px;
+            background: black;
+            border-radius: 50%;
+        }
+        .text {
+            margin-top: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            animation: fadeIn 2s ease-in-out infinite alternate;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        @keyframes flap {
+            0% { transform: rotate(10deg); }
+            100% { transform: rotate(-10deg); }
+        }
+        @keyframes fadeIn {
+            0% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="halo"></div>
+        <div class="wings left-wing"></div>
+        <div class="slime">
+            <div class="eyes">
+                <div class="eye"></div>
+                <div class="eye"></div>
+            </div>
+        </div>
+        <div class="wings right-wing"></div>
+    </div>
+    <div class="text">Starting Soon...</div>
+</body>
+</html>
