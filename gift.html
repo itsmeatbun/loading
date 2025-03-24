@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TikTok Live Gift Tracker</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: #f4f4f4;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .gift-card {
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            position: fixed;
+            left: 50%;
+            bottom: -100px;
+            width: 50px;
+            text-align: center;
+            opacity: 0;
+            transform: translateX(-50%) scale(0.5) rotateX(90deg);
+            visibility: hidden;
+            transition: transform 0.6s ease, opacity 0.4s ease, visibility 0.4s, width 0.6s ease, bottom 0.6s ease;
+        }
+
+        .gift-card.show {
+            opacity: 1;
+            visibility: visible;
+            width: 300px;
+            bottom: 50%;
+            transform: translateX(-50%) scale(1) rotateX(0deg);
+        }
+
+        .gift-card.hide {
+            opacity: 0;
+            width: 50px;
+            bottom: -100px;
+            transform: translateX(-50%) scale(0.5) rotateX(-90deg);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="giftCard" class="gift-card">
+        <p><strong id="giftUser"></strong> memberikan gift!</p>
+        <p id="randomQuestion"></p>
+    </div>
+
+    <script>
+        const socket = io("http://localhost:3001");
+
+        const questions = [
+            "Apa makanan favoritmu?", "Jika bisa memiliki kekuatan super, apa yang kamu pilih?",
+            "Apa film terbaik yang pernah kamu tonton?", "Jika bisa berkunjung ke masa lalu, kamu ingin ke zaman apa?",
+            "Apa lagu favoritmu saat ini?", "Sebutkan 3 benda yang selalu ada di tasmu!",
+            "Jika bisa tinggal di mana saja di dunia ini, kamu pilih di mana?", "Apa hal paling konyol yang pernah kamu lakukan?",
+            "Jika jadi karakter game, kamu ingin jadi siapa?", "Lebih suka teh atau kopi?",
+            "Apa kartun favoritmu dulu?", "Apa makanan yang mengingatkanmu pada masa kecil?",
+            "Apa hal paling nakal yang pernah kamu lakukan saat kecil?", "Apa cita-citamu saat kecil?",
+            "Apa pelajaran sekolah yang paling kamu benci?", "Apa kenangan terbaik yang kamu punya dengan sahabatmu?",
+            "Apa definisi cinta menurutmu?", "Bagaimana cara kamu menunjukkan rasa sayang?",
+            "Apa hobi yang baru-baru ini kamu coba?", "Apa aktivitas yang membuatmu lupa waktu?",
+            "Jika bisa ahli dalam satu bidang, kamu ingin jadi ahli dalam apa?", "Lebih suka olahraga atau rebahan?",
+            "Apa hal yang selalu kamu lakukan sebelum tidur?", "Apa lagu yang paling sering kamu putar?",
+            "Apa tontonan favoritmu saat ini?", "Apa kebiasaan yang ingin kamu ubah dalam dirimu?",
+            "Apa buku terakhir yang kamu baca?", "Apa arti kebahagiaan menurutmu?",
+            "Apa keputusan terbesar yang pernah kamu buat?", "Apa hal yang paling kamu syukuri dalam hidup?",
+            "Jika bisa merencanakan liburan impian, kamu ingin ke mana?", "Apa yang ingin kamu wariskan untuk dunia?",
+            "Apa game terbaik menurutmu?", "Apa aplikasi yang paling sering kamu gunakan?",
+            "Jika harus hidup tanpa media sosial selama sebulan, bisakah kamu?", "Apa gadget impianmu?",
+            "Apa benda teraneh yang pernah kamu beli?", "Apa tantangan paling konyol yang pernah kamu lakukan?",
+            "Jika hidupmu dibuat jadi film, siapa aktor yang akan memerankanmu?",
+            "Jika dunia hanya punya satu warna, warna apa yang kamu pilih?",
+            "Apa nama panggilan teraneh yang pernah kamu punya?", "Lebih suka tinggal di pegunungan atau pantai?",
+            "Apa hal yang menurutmu aneh tapi orang lain suka?", "Jika harus memakai satu jenis pakaian selamanya, kamu pilih apa?",
+            "Jika kamu adalah hantu, bagaimana cara kamu menakut-nakuti orang?",
+            "Jika dunia ini hanya memiliki satu makanan, kamu ingin apa?", "Apa hal pertama yang kamu lakukan jika jadi presiden?",
+            "Jika bisa berbicara dengan hewan, hewan apa yang ingin kamu ajak ngobrol?",
+            "Apa hal paling memalukan yang pernah terjadi padamu?", "Apa benda favoritmu sepanjang hidup?",
+            "Jika besok adalah hari terakhir hidupmu, bagaimana kamu akan menghabiskannya?",
+            "Jika harus hidup hanya dengan satu jenis makanan, apa yang kamu pilih?",
+            "Jika harus pakai kostum aneh selama sehari, kamu pilih jadi apa?",
+            "Jika harus hidup tanpa internet selama setahun, bisakah kamu melakukannya?",
+            "Apa ketakutan terbesarmu?", "Apa hal terbaik yang pernah diajarkan seseorang kepadamu?",
+            "Apa hal kecil yang bisa membuatmu bahagia?", "Apa keputusan terbesar yang pernah kamu buat?",
+            "Apa definisi kesuksesan menurutmu?", "Jika bisa mengubah satu hal di dunia ini, apa yang akan kamu ubah?",
+            "Jika diberi kesempatan untuk memulai hidup dari awal, apakah kamu akan melakukannya?",
+            "Jika harus memilih antara kekayaan dan kebijaksanaan, mana yang kamu pilih?",
+            "Jika harus hidup di dunia game, kamu ingin tinggal di dunia game apa?",
+            "Apa game yang paling bikin kamu nostalgia?", "Apa hal yang paling bikin kamu ilfeel dari seseorang?",
+            "Apa cara terbaik untuk menyatakan perasaan kepada seseorang?",
+            "Apa momen terbaik di masa kecil yang masih kamu ingat?", "Apa kebiasaan unik yang kamu punya?",
+            "Apa hal pertama yang kamu lakukan saat bangun tidur?", "Apa yang paling kamu cari dalam seorang teman?"
+        ];
+        console.log(questions.length)
+        let queue = [];
+        let isShowing = false;
+
+        function showNextGift() {
+            if (queue.length === 0 || isShowing) return;
+
+            isShowing = true;
+            const data = queue.shift();
+            const giftCard = document.getElementById("giftCard");
+            document.getElementById("giftUser").innerText = data.user;
+            document.getElementById("randomQuestion").innerText = questions[Math.floor(Math.random() * questions.length)];
+
+            giftCard.classList.add("show");
+            giftCard.classList.remove("hide");
+
+            setTimeout(() => {
+                giftCard.classList.add("hide");
+                setTimeout(() => {
+                    giftCard.classList.remove("show");
+                    isShowing = false;
+                    showNextGift();
+                }, 600);
+            }, 5000);
+        }
+
+        socket.on("newGift", (data) => {
+            queue.push(data);
+            if (!isShowing) showNextGift();
+        });
+    </script>
+
+</body>
+</html>
