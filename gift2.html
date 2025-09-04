@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Light Trigger Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- biar background benar2 transparan di OBS/Browser Source -->
+  <meta name="theme-color" content="transparent" />
+  <style>
+    :root {
+      --spawn-duration-ms: 3500;   /* berapa lama GIF di layar */
+      --max-on-screen: 12;         /* batas maksimal GIF sekaligus */
+    }
+
+    /* Portrait canvas, full-viewport, transparan */
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: transparent;             /* penting */
+      overflow: hidden;                     /* jangan ada scroll */
+    }
+
+    /* Kanvas 9:16 responsive */
+    .stage {
+      position: fixed;
+      inset: 0;
+      margin: 0;
+      background: transparent;             /* tetap transparan */
+      width: 100vw;
+      height: 100vh;
+      aspect-ratio: 9 / 16;                /* jaga portrait */
+      overflow: hidden;
+      pointer-events: none;                 /* biar klik tembus (opsional) */
+    }
+
+    /* Elemen GIF yang muncul */
+    .spark {
+      position: absolute;
+      will-change: transform, opacity;
+      transform: translate(-50%, -50%) scale(0.85);
+      opacity: 1;
+      animation: popfade var(--spawn-duration-ms) ease-in-out forwards;
+      pointer-events: none;
+      image-rendering: auto;
+      filter: drop-shadow(0 6px 20px rgba(0,0,0,0.25));
+      z-index: 10;
+    }
+
+    /* Animasi: masuk -> stay -> keluar */
+    @keyframes popfade {
+      0%   { opacity: 1; transform: translate(-50%, -50%) scale(0.6) rotate(0deg); }
+      10%  { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(2deg); }
+      80%  { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-2deg); }
+      100% { opacity: 1; transform: translate(-50%, -50%) scale(0.6) rotate(0deg); }
+    }
+
+    /* (Opsional) indikator koneksi kecil pojok kiri atas */
+    .status {
+      position: fixed;
+      left: 10px;
+      top: 10px;
+      font: 600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
+      color: #fff;
+      background: rgba(0,0,0,0.35);
+      padding: 6px 10px;
+      border-radius: 10px;
+      letter-spacing: .2px;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      pointer-events: none;
+    }
+    .status.ok { background: rgba(4, 120, 87, 0.35); }      /* hijau */
+    .status.err { background: rgba(185, 28, 28, 0.45); }    /* merah */
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    
+  </div>
+  <div class="status" id="status">⏳ connecting…</div>
+
+  <!-- Socket.IO client -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    /**********************
+     * KONFIGURASI
+     **********************/
+    const SOCKET_URL = "http://localhost:62025"; // ganti kalau beda host/port
+    const GIF_SOURCES = [
+      "light.gif"
+    ];
+    const TRIGGER_KEYWORD = "!light"; // kata pemicu (case-insensitive)
+    const MATCH_MODE = "contains";    // "equals" atau "contains"
+
+    // ukuran GIF acak
+    const SIZE_MIN_PX = 120;
+    const SIZE_MAX_PX = 260;
+
+    // batas safe-margin supaya GIF tidak kepotong di pinggir
+    const EDGE_MARGIN_PCT = 8; // persen
+
+    /**********************
+     * FUNGSI UTIL
+     **********************/
+    const stageEl = document.getElementById("stage");
+    const statusEl = document.getElementById("status");
+
+    function pickRandom(arr) {
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
+
+    function randomInt(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function randomPercent(minPct, maxPct) {
+      return Math.random() * (maxPct - minPct) + minPct;
+    }
+
+    function shouldTrigger(commentRaw) {
+      if (!commentRaw) return false;
+      const text = String(commentRaw).trim().toLowerCase();
+      const key = TRIGGER_KEYWORD.toLowerCase();
+
+      if (MATCH_MODE === "equals") return text === key;
+      return text.includes(key);
+    }
+
+    // spawn GIF di posisi random (di dalam stage)
+    function spawnSpark() {
+      // batasi jumlah elemen di layar
+      const current = stageEl.querySelectorAll(".spark");
+      if (current.length >= parseInt(getComputedStyle(document.documentElement).getPropertyValue("--max-on-screen")) ) {
+        // kalau kebanyakan, hapus yang paling lama
+        current[0]?.remove();
+      }
+
+      const img = document.createElement("img");
+      img.className = "spark";
+      img.src = pickRandom(GIF_SOURCES);
+
+      // random size
+      const size = randomInt(SIZE_MIN_PX, SIZE_MAX_PX);
+      img.style.width = size + "px";
+      img.style.height = "auto";
+
+      // hitung posisi random dengan margin aman
+      const minPct = EDGE_MARGIN_PCT;
+      const maxPctX = 100 - EDGE_MARGIN_PCT;
+      const maxPctY = 100 - EDGE_MARGIN_PCT;
+
+      const xPct = randomPercent(minPct, maxPctX);
+      const yPct = randomPercent(minPct, maxPctY);
+
+      img.style.left = xPct + "%";
+      img.style.top  = yPct + "%";
+
+      // hapus setelah durasi
+      const life = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--spawn-duration-ms"));
+      setTimeout(() => img.remove(), life + 50);
+
+      stageEl.appendChild(img);
+    }
+
+    function handleIncomingChat(chatObj) {
+      // chatObj diharapkan punya { uniqueId, comment }
+      if (!chatObj || typeof chatObj !== "object") return;
+
+      const comment = chatObj.comment ?? chatObj.text ?? "";
+      if (shouldTrigger(comment)) {
+        spawnSpark();
+      }
+    }
+
+    /**********************
+     * SOCKET IO
+     **********************/
+    const socket = io(SOCKET_URL, {
+      transports: ["websocket"],
+    });
+
+    socket.on("connect", () => {
+      statusEl.textContent = `✅ connected (${socket.id})`;
+      statusEl.classList.remove("err");
+      statusEl.classList.add("ok");
+    });
+
+    socket.on("disconnect", (reason) => {
+      statusEl.textContent = `⚠️ disconnected: ${reason}`;
+      statusEl.classList.remove("ok");
+      statusEl.classList.add("err");
+    });
+
+    socket.on("connect_error", (err) => {
+      statusEl.textContent = `❌ connect error: ${err?.message || err}`;
+      statusEl.classList.remove("ok");
+      statusEl.classList.add("err");
+    });
+
+    // 1) versi universal (payload { event, data })
+    socket.on("message", (payload) => {
+      try {
+        if (!payload || typeof payload !== "object") return;
+        const { event, data } = payload;
+        if (event === "chat" && data) {
+          handleIncomingChat(data);
+        }
+      } catch (e) {
+        // diamkan saja/log
+        console.error(e);
+      }
+    });
+
+    // 2) server emit langsung 'chat', kirim objek chat
+    socket.on("chat", (chat) => {
+      handleIncomingChat(chat);
+    });
+
+    /**********************
+     * TEST LOCAL (opsional)
+     * Tekan "t" untuk spawn dummy chat "!light"
+     **********************/
+    window.addEventListener("keydown", (e) => {
+      if (e.key.toLowerCase() === "t") {
+        handleIncomingChat({ uniqueId: "tester", comment: "!light" });
+      }
+    });
+  </script>
+</body>
+</html>
