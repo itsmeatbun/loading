@@ -2,232 +2,297 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8" />
-  <title>Light Trigger Overlay</title>
+  <title>Multi Trigger Overlay</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- biar background benar2 transparan di OBS/Browser Source -->
   <meta name="theme-color" content="transparent" />
   <style>
-    :root {
-      --spawn-duration-ms: 3500;   /* berapa lama GIF di layar */
-      --max-on-screen: 12;         /* batas maksimal GIF sekaligus */
+    :root{
+      --spawn-duration-ms: 3600;  /* default durasi */
+      --max-on-screen: 24;        /* batas elemen total */
     }
-
-    /* Portrait canvas, full-viewport, transparan */
-    html, body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      background: transparent;             /* penting */
-      overflow: hidden;                     /* jangan ada scroll */
+    html,body{
+      width:100%;height:100%;
+      margin:0;padding:0;
+      background:transparent;
+      overflow:hidden;
     }
-
-    /* Kanvas 9:16 responsive */
-    .stage {
-      position: fixed;
-      inset: 0;
-      margin: 0;
-      background: transparent;             /* tetap transparan */
-      width: 100vw;
-      height: 100vh;
-      aspect-ratio: 9 / 16;                /* jaga portrait */
-      overflow: hidden;
-      pointer-events: none;                 /* biar klik tembus (opsional) */
+    .stage{
+      position:fixed; inset:0;
+      width:100vw; height:100vh;
+      aspect-ratio:9/16;
+      background:transparent;
+      overflow:hidden; pointer-events:none;
+      z-index: 9999;
     }
-
-    /* Elemen GIF yang muncul */
-    .spark {
-      position: absolute;
+    .spark{
+      position:absolute;
       will-change: transform, opacity;
-      transform: translate(-50%, -50%) scale(0.85);
-      opacity: 1;
-      animation: popfade var(--spawn-duration-ms) ease-in-out forwards;
-      pointer-events: none;
-      image-rendering: auto;
-      filter: drop-shadow(0 6px 20px rgba(0,0,0,0.25));
-      z-index: 10;
+      transform: translate(-50%,-50%) scale(0.9) rotate(var(--rot,0deg));
+      opacity:0;
+      pointer-events:none;
+      image-rendering:auto;
+      filter: drop-shadow(0 6px 20px rgba(0,0,0,.25));
+      animation:
+        popfade var(--life, var(--spawn-duration-ms)) ease-in-out forwards,
+        drift var(--life, var(--spawn-duration-ms)) linear forwards;
+    }
+    /* masuk → stay → keluar */
+    @keyframes popfade{
+      0%   {opacity:0; transform: translate(-50%,-50%) scale(.6) rotate(var(--rot,0deg));}
+      12%  {opacity:1; transform: translate(-50%,-50%) scale(1) rotate(calc(var(--rot,0deg) + 3deg));}
+      80%  {opacity:1; transform: translate(-50%,-50%) scale(1) rotate(calc(var(--rot,0deg) - 3deg));}
+      100% {opacity:0; transform: translate(-50%,-50%) scale(.6) rotate(var(--rot,0deg));}
+    }
+    /* sedikit gerak supaya “hidup” */
+    @keyframes drift{
+      0%   { transform: translate(calc(-50% + 0px), calc(-50% + 0px)) scale(1) rotate(var(--rot,0deg)); }
+      100% { transform: translate(calc(-50% + var(--dx,0px)), calc(-50% + var(--dy,0px))) scale(1) rotate(var(--rot,0deg)); }
     }
 
-    /* Animasi: masuk -> stay -> keluar */
-    @keyframes popfade {
-      0%   { opacity: 1; transform: translate(-50%, -50%) scale(0.6) rotate(0deg); }
-      10%  { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(2deg); }
-      80%  { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-2deg); }
-      100% { opacity: 1; transform: translate(-50%, -50%) scale(0.6) rotate(0deg); }
+    .status{
+      position:fixed; left:10px; top:10px;
+      font:600 12px ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      color:#fff; background:rgba(0,0,0,.35);
+      padding:6px 10px; border-radius:10px;
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      pointer-events:none; z-index:10000;
     }
-
-    /* (Opsional) indikator koneksi kecil pojok kiri atas */
-    .status {
-      position: fixed;
-      left: 10px;
-      top: 10px;
-      font: 600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
-      color: #fff;
-      background: rgba(0,0,0,0.35);
-      padding: 6px 10px;
-      border-radius: 10px;
-      letter-spacing: .2px;
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      pointer-events: none;
-    }
-    .status.ok { background: rgba(4, 120, 87, 0.35); }      /* hijau */
-    .status.err { background: rgba(185, 28, 28, 0.45); }    /* merah */
+    .status.ok{ background: rgba(4,120,87,.35); }
+    .status.err{ background: rgba(185,28,28,.45); }
   </style>
 </head>
 <body>
-  <div class="stage" id="stage">
-    
-  </div>
-<!--   <div class="status" id="status">⏳ connecting…</div> -->
+  <div class="stage" id="stage"></div>
+  <div class="status" id="status">⏳ connecting…</div>
 
-  <!-- Socket.IO client -->
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script>
     /**********************
-     * KONFIGURASI
+     * KONFIG
      **********************/
-    const SOCKET_URL = "http://localhost:62025"; // ganti kalau beda host/port
-    const GIF_SOURCES = [
-      "light.gif"
-    ];
-    const TRIGGER_KEYWORD = "!light"; // kata pemicu (case-insensitive)
-    const MATCH_MODE = "contains";    // "equals" atau "contains"
+    const SOCKET_URL = "http://localhost:62025";
 
-    // ukuran GIF acak
-    const SIZE_MIN_PX = 120;
-    const SIZE_MAX_PX = 260;
+    /**
+     * TRIGGER_MAP:
+     * key: keyword (lowercase), value: konfigurasi
+     * - sources: array URL/path GIF
+     * - count: berapa GIF ditaruh tiap trigger
+     * - size: [minPx, maxPx]
+     * - lifeMs: override durasi tampil (opsional)
+     * - marginPct: area aman dari tepi (opsional, default 8)
+     */
+    const TRIGGER_MAP = {
+      "!light": {
+        sources: [
+          "light.gif",
+          // Tambah variasi bebas:
+          // "https://media.tenor.com/0Z3CAc1l6aAAAAAC/sparkle-stars.gif",
+        ],
+        count: 4,
+        size: [120, 220],
+        lifeMs: 3400,
+        marginPct: 10,
+      },
+      "!star": {
+        sources: [
+          "star.gif",
+        ],
+        count: 6,
+        size: [90, 160],
+        lifeMs: 3200,
+      },
+      "!heart": {
+        sources: [
+          "heart.gif",
+        ],
+        count: 5,
+        size: [110, 180],
+        lifeMs: 3600,
+      },
+      "!boom": {
+        sources: [
+          "boom.gif",
+        ],
+        count: 3,
+        size: [180, 260],
+        lifeMs: 2800,
+        marginPct: 12,
+      },
+      "👏🏻": {
+        sources: [
+          "clap.gif",
+        ],
+        count: 3,
+        size: [100, 160],
+        lifeMs: 2800,
+        marginPct: 12,
+      },
+      "👏🏽": {
+        sources: [
+          "clap.gif",
+        ],
+        count: 3,
+        size: [100, 160],
+        lifeMs: 2800,
+        marginPct: 12,
+      },"👏": {
+        sources: [
+          "clap.gif",
+        ],
+        count: 3,
+        size: [100, 160],
+        lifeMs: 2800,
+        marginPct: 12,
+      },
+      "!clap": {
+        sources: [
+          "clap.gif",
+        ],
+        count: 5,
+        size: [100, 160],
+        lifeMs: 2800,
+        marginPct: 12,
+      },
+    };
 
-    // batas safe-margin supaya GIF tidak kepotong di pinggir
-    const EDGE_MARGIN_PCT = 8; // persen
+    const DEFAULT_SIZE = [120, 260];
+    const DEFAULT_MARGIN = 8;
 
     /**********************
-     * FUNGSI UTIL
+     * UTIL
      **********************/
     const stageEl = document.getElementById("stage");
     const statusEl = document.getElementById("status");
 
-    function pickRandom(arr) {
-      return arr[Math.floor(Math.random() * arr.length)];
+    const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+    const randFloat = (min, max) => Math.random() * (max - min) + min;
+
+    function maxOnScreen(){
+      const n = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--max-on-screen"));
+      return isNaN(n) ? 24 : n;
     }
 
-    function randomInt(min, max) {
-      return Math.floor(Math.random() * (max - min + 1)) + min;
-    }
-
-    function randomPercent(minPct, maxPct) {
-      return Math.random() * (maxPct - minPct) + minPct;
-    }
-
-    function shouldTrigger(commentRaw) {
-      if (!commentRaw) return false;
-      const text = String(commentRaw).trim().toLowerCase();
-      const key = TRIGGER_KEYWORD.toLowerCase();
-
-      if (MATCH_MODE === "equals") return text === key;
-      return text.includes(key);
-    }
-
-    // spawn GIF di posisi random (di dalam stage)
-    function spawnSpark() {
-      // batasi jumlah elemen di layar
-      const current = stageEl.querySelectorAll(".spark");
-      if (current.length >= parseInt(getComputedStyle(document.documentElement).getPropertyValue("--max-on-screen")) ) {
-        // kalau kebanyakan, hapus yang paling lama
-        current[0]?.remove();
+    function clampSpawn(){
+      const nodes = stageEl.querySelectorAll(".spark");
+      const limit = maxOnScreen();
+      const overflow = nodes.length - limit;
+      if (overflow >= 0) {
+        // hapus paling awal dulu biar gantian
+        for (let i=0; i<=overflow; i++) nodes[i]?.remove();
       }
+    }
+
+    function spawnOne({ src, sizeRange, marginPct, lifeMs }){
+      clampSpawn();
 
       const img = document.createElement("img");
       img.className = "spark";
-      img.src = pickRandom(GIF_SOURCES);
+      img.src = src;
 
-      // random size
-      const size = randomInt(SIZE_MIN_PX, SIZE_MAX_PX);
-      img.style.width = size + "px";
+      // ukuran random
+      const [minPx, maxPx] = sizeRange || DEFAULT_SIZE;
+      const w = randInt(minPx, maxPx);
+      img.style.width = w + "px";
       img.style.height = "auto";
 
-      // hitung posisi random dengan margin aman
-      const minPct = EDGE_MARGIN_PCT;
-      const maxPctX = 100 - EDGE_MARGIN_PCT;
-      const maxPctY = 100 - EDGE_MARGIN_PCT;
-
-      const xPct = randomPercent(minPct, maxPctX);
-      const yPct = randomPercent(minPct, maxPctY);
-
+      // posisi random
+      const safe = (typeof marginPct === "number" ? marginPct : DEFAULT_MARGIN);
+      const xPct = randFloat(safe, 100 - safe);
+      const yPct = randFloat(safe, 100 - safe);
       img.style.left = xPct + "%";
       img.style.top  = yPct + "%";
 
-      // hapus setelah durasi
-      const life = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--spawn-duration-ms"));
-      setTimeout(() => img.remove(), life + 50);
+      // animasi param
+      const life = lifeMs || parseInt(getComputedStyle(document.documentElement).getPropertyValue("--spawn-duration-ms")) || 3600;
+      img.style.setProperty("--life", life + "ms");
+      img.style.setProperty("--rot", randInt(-12, 12) + "deg");
+      img.style.setProperty("--dx", randInt(-30, 30) + "px");
+      img.style.setProperty("--dy", randInt(-40, 40) + "px");
+
+      // cleanup
+      setTimeout(() => img.remove(), life + 60);
+
+      // debug load error
+      img.addEventListener("error", () => console.warn("⚠️ GIF gagal dimuat:", src));
 
       stageEl.appendChild(img);
     }
 
-    function handleIncomingChat(chatObj) {
-      // chatObj diharapkan punya { uniqueId, comment }
-      if (!chatObj || typeof chatObj !== "object") return;
+    function spawnByTrigger(triggerKey){
+      const cfg = TRIGGER_MAP[triggerKey];
+      if (!cfg || !Array.isArray(cfg.sources) || cfg.sources.length === 0) return;
+      const n = Math.max(1, cfg.count || 1);
+      for (let i=0; i<n; i++){
+        const src = pickRandom(cfg.sources);
+        spawnOne({
+          src,
+          sizeRange: cfg.size || DEFAULT_SIZE,
+          marginPct: cfg.marginPct,
+          lifeMs: cfg.lifeMs,
+        });
+      }
+    }
 
-      const comment = chatObj.comment ?? chatObj.text ?? "";
-      if (shouldTrigger(comment)) {
-        spawnSpark();
+    function extractTriggers(textRaw){
+      if (!textRaw) return [];
+      const text = String(textRaw).toLowerCase();
+      const found = [];
+      for (const key of Object.keys(TRIGGER_MAP)){
+        if (text.includes(key)) found.push(key);
+      }
+      return found;
+    }
+
+    /**********************
+     * SOCKET + HANDLER
+     **********************/
+    const socket = io(SOCKET_URL, { transports:["websocket"] });
+
+    socket.on("connect", () => {
+      statusEl.textContent = `✅ connected (${socket.id})`;
+      statusEl.classList.remove("err"); statusEl.classList.add("ok");
+    });
+    socket.on("disconnect", (r) => {
+      statusEl.textContent = `⚠️ disconnected: ${r}`;
+      statusEl.classList.remove("ok"); statusEl.classList.add("err");
+    });
+    socket.on("connect_error", (e) => {
+      statusEl.textContent = `❌ connect error: ${e?.message || e}`;
+      statusEl.classList.remove("ok"); statusEl.classList.add("err");
+    });
+
+    // server kirim payload universal {event, data}
+    socket.on("message", (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      const { event, data } = payload;
+      if (event === "chat" && data) onIncomingChat(data);
+    });
+
+    // server emit langsung 'chat', {uniqueId, comment}
+    socket.on("chat", (chat) => onIncomingChat(chat));
+
+    function onIncomingChat(obj){
+      const comment = obj?.comment ?? obj?.text ?? "";
+      const keys = extractTriggers(comment);
+      if (keys.length){
+        // eksekusi semua trigger yang ditemukan
+        keys.forEach(spawnByTrigger);
       }
     }
 
     /**********************
-     * SOCKET IO
+     * TEST MANUAL:
+     * T = "!light", Y = "!star", U = "!heart", I = "!boom"
      **********************/
-    const socket = io(SOCKET_URL, {
-      transports: ["websocket"],
-    });
-
-    socket.on("connect", () => {
-      statusEl.textContent = `✅ connected (${socket.id})`;
-      statusEl.classList.remove("err");
-      statusEl.classList.add("ok");
-    });
-
-    socket.on("disconnect", (reason) => {
-      statusEl.textContent = `⚠️ disconnected: ${reason}`;
-      statusEl.classList.remove("ok");
-      statusEl.classList.add("err");
-    });
-
-    socket.on("connect_error", (err) => {
-      statusEl.textContent = `❌ connect error: ${err?.message || err}`;
-      statusEl.classList.remove("ok");
-      statusEl.classList.add("err");
-    });
-
-    // 1) versi universal (payload { event, data })
-    socket.on("message", (payload) => {
-      try {
-        if (!payload || typeof payload !== "object") return;
-        const { event, data } = payload;
-        if (event === "chat" && data) {
-          handleIncomingChat(data);
-        }
-      } catch (e) {
-        // diamkan saja/log
-        console.error(e);
-      }
-    });
-
-    // 2) server emit langsung 'chat', kirim objek chat
-    socket.on("chat", (chat) => {
-      handleIncomingChat(chat);
-    });
-
-    /**********************
-     * TEST LOCAL (opsional)
-     * Tekan "t" untuk spawn dummy chat "!light"
-     **********************/
-    window.addEventListener("keydown", (e) => {
-      if (e.key.toLowerCase() === "t") {
-        handleIncomingChat({ uniqueId: "tester", comment: "!light" });
-      }
+    window.addEventListener("keydown", (e)=>{
+      const k = e.key.toLowerCase();
+      if (k === "t") onIncomingChat({comment:"!light"});
+      if (k === "y") onIncomingChat({comment:"!star"});
+      if (k === "u") onIncomingChat({comment:"!heart"});
+      if (k === "i") onIncomingChat({comment:"!boom"});
+      if (k === "p") onIncomingChat({comment:"wow !light !heart !star combo"}); // multi
     });
   </script>
 </body>
 </html>
-
