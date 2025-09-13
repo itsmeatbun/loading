@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gift → Question Cards Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="transparent" />
+  <style>
+    :root{
+      /* Tuning */
+      --card-life-ms: 5200;        /* total durasi 1 kartu di layar */
+      --enter-ms: 700;             /* durasi animasi masuk */
+      --exit-ms: 500;              /* durasi animasi keluar */
+      --max-on-screen: 3;          /* batas kartu aktif bersamaan */
+      --queue-size: 30;            /* maksimal antrian */
+      --stack-gap: 12px;           /* jarak antar kartu saat stack */
+      --safe-margin-x: 6vw;        /* area aman kiri/kanan */
+      --safe-margin-bottom: 3vh;   /* jarak dari bawah */
+    }
+
+    html,body{
+      width:100%; height:100%;
+      margin:0; padding:0;
+      background:transparent;
+      overflow:hidden;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+
+    /* Kanvas 9:16 transparan */
+    .stage{
+      position:fixed; inset:0;
+      width:100vw; height:100vh;
+      aspect-ratio: 9/16;
+      background:transparent;
+      pointer-events:none;
+      z-index: 9999;
+    }
+
+    /* Container stack dari bawah */
+    .stack{
+      position:absolute;
+      left:50%;
+      bottom: var(--safe-margin-bottom);
+      transform: translateX(-50%);
+      width: clamp(260px, 72vw, 560px);
+      max-width: calc(100vw - (var(--safe-margin-x)*2));
+      display:flex;
+      flex-direction:column-reverse; /* kartu baru muncul paling bawah */
+      align-items:center;
+      gap: var(--stack-gap);
+      padding: 0 var(--safe-margin-x);
+    }
+
+    /* Kartu pertanyaan */
+    .qcard{
+      position:relative;
+      width:100%;
+      pointer-events:none;
+      color:#fff;
+      /* Glassmorphism */
+      background: radial-gradient(120% 140% at 10% 10%, rgba(255,255,255,.12), rgba(255,255,255,.06)) ,
+                  linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.05));
+      border: 1px solid rgba(255,255,255,.22);
+      box-shadow:
+        0 8px 28px rgba(0,0,0,.35),
+        inset 0 0 0 1px rgba(255,255,255,.06);
+      backdrop-filter: blur(10px) saturate(120%);
+      -webkit-backdrop-filter: blur(10px) saturate(120%);
+      border-radius: 18px;
+      overflow:hidden;
+
+      /* Animations */
+      opacity:0;
+      transform: translateY(30%) scale(.96);
+      animation:
+        enterUp var(--enter-ms) cubic-bezier(.2,.9,.25,1.0) forwards,
+        floaty calc(var(--card-life-ms) - var(--enter-ms) - var(--exit-ms)) ease-in-out var(--enter-ms) forwards,
+        exitDown var(--exit-ms) cubic-bezier(.5,0,.9,.2) calc(var(--card-life-ms) - var(--exit-ms)) forwards;
+    }
+
+    .qcard .bar{
+      position:absolute; inset:0;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.20), rgba(255,255,255,0) 50%),
+        radial-gradient(60% 140% at 10% 0%, rgba(99,102,241,.35), rgba(236,72,153,.28) 48%, rgba(14,165,233,.22) 90%);
+      opacity:.55;
+      pointer-events:none;
+    }
+
+    .qcard .inner{
+      position:relative;
+      padding: 16px 18px 14px 18px;
+    }
+
+    .qcard .meta{
+      display:flex; align-items:center; gap:10px;
+      font-weight:700; font-size:13px; letter-spacing:.2px;
+      text-shadow: 0 2px 10px rgba(0,0,0,.35);
+      opacity:.95;
+    }
+
+    .badge{
+      display:inline-flex; align-items:center; gap:6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.18);
+      backdrop-filter: blur(6px);
+    }
+
+    .gifticon{
+      width:18px; height:18px; object-fit:contain;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,.35));
+    }
+
+    .uname{ font-weight:800; }
+
+    .qtext{
+      margin-top:10px;
+      font-weight:800;
+      line-height:1.2;
+      font-size: clamp(18px, 3.6vw, 28px);
+      text-shadow: 0 3px 18px rgba(0,0,0,.45);
+    }
+
+    .hint{
+      margin-top:8px;
+      font-size:12px; opacity:.9; font-weight:600;
+      letter-spacing:.25px;
+    }
+
+    .progress{
+      position:absolute; left:0; right:0; bottom:0;
+      height:4px; overflow:hidden;
+      background: rgba(255,255,255,.12);
+    }
+    .progress > i{
+      display:block; height:100%;
+      background: linear-gradient(90deg, #60a5fa, #a78bfa, #f472b6, #22d3ee);
+      background-size: 200% 100%;
+      animation: prog var(--card-life-ms) linear forwards, hue 8s linear infinite;
+      filter: saturate(120%);
+    }
+
+    /* Status bubble */
+    .status{
+      position:fixed; left:10px; top:10px;
+      font:600 12px ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      color:#fff; background:rgba(0,0,0,.35);
+      padding:6px 10px; border-radius:10px;
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      pointer-events:none; z-index:10000;
+    }
+    .status.ok{ background: rgba(4,120,87,.35); }
+    .status.err{ background: rgba(185,28,28,.45); }
+
+    /* Animations */
+    @keyframes enterUp{
+      0%{ opacity:0; transform: translateY(30%) scale(.96) }
+      60%{ opacity:1; transform: translateY(-6%) scale(1.01) }
+      100%{ opacity:1; transform: translateY(0%) scale(1) }
+    }
+    @keyframes floaty{
+      0%{ transform: translateY(0%) }
+      50%{ transform: translateY(-3%) }
+      100%{ transform: translateY(0%) }
+    }
+    @keyframes exitDown{
+      0%{ opacity:1; transform: translateY(0%) scale(1) }
+      100%{ opacity:0; transform: translateY(15%) scale(.98) }
+    }
+    @keyframes prog{
+      0%{ width: 100% }
+      100%{ width: 0% }
+    }
+    @keyframes hue{
+      0%{ filter: hue-rotate(0deg) }
+      100%{ filter: hue-rotate(360deg) }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <div class="stack" id="stack"></div>
+  </div>
+  <div class="status" id="status">⏳ connecting…</div>
+
+  <!-- Socket.IO -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script>
+    /**********************
+     * KONFIGURASI
+     **********************/
+    const SOCKET_URL = "http://localhost:62025";
+
+    /* Bank pertanyaan (bisa kamu ganti sesuka hati) */
+    const QUESTIONS = [
+      "Kalau kamu jadi makanan, kamu cocoknya rasa apa & kenapa?",
+      "Apa film/animanga comfort kamu akhir-akhir ini?",
+      "Team kucing, anjing, atau ular hijau imut? Defend your choice!",
+      "Guilty pleasure snack kamu apa?",
+      "Kalau bisa teleport 1x hari ini, kamu ke mana & ngapain?",
+      "Sebut 1 skill random yang pengen banget kamu kuasai!",
+      "Satu lagu wajib yang bikin mood naik?",
+      "Pagi orangnya kopi, teh, atau air putih doang?",
+      "Apa barang paling nggak berguna tapi kamu sayang?",
+      "Momen kecil hari ini yang bikin senyum?"
+    ];
+
+    /* Anti-ulang pertanyaan terakhir N */
+    const RECENT_NO_REPEAT = 5;
+
+    /* Opsi tampilan kecil */
+    const HINT_TEXT = "Jawab di chat ya 💬";
+    const DEFAULT_GIFT_ICON = ""; // opsional: taruh url icon gift di sini
+
+    /**********************
+     * STATE
+     **********************/
+    const stackEl = document.getElementById("stack");
+    const statusEl = document.getElementById("status");
+    let recentQ = [];
+    const queue = [];
+    let activeCards = 0;
+
+    function pickQuestion(){
+      const pool = QUESTIONS.filter(q => !recentQ.includes(q));
+      const q = pool.length ? pool[Math.floor(Math.random()*pool.length)] : QUESTIONS[Math.floor(Math.random()*QUESTIONS.length)];
+      recentQ.push(q);
+      if (recentQ.length > RECENT_NO_REPEAT) recentQ.shift();
+      return q;
+    }
+
+    function pushQueue(item){
+      if (queue.length >= parseInt(getComputedStyle(document.documentElement).getPropertyValue("--queue-size"))){
+        queue.shift(); // buang paling lama biar tetap mengalir
+      }
+      queue.push(item);
+      pump();
+    }
+
+    function maxOnScreen(){
+      const n = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--max-on-screen"));
+      return isNaN(n) ? 3 : n;
+    }
+
+    function pump(){
+      while (activeCards < maxOnScreen() && queue.length){
+        const data = queue.shift();
+        spawnCard(data);
+      }
+    }
+
+    function createCardElement({username, giftName, giftIcon, question}){
+      const card = document.createElement("div");
+      card.className = "qcard";
+      card.style.setProperty("--card-life-ms", `${CARD_LIFE_MS()}ms`);
+      card.style.setProperty("--enter-ms", `${ENTER_MS()}ms`);
+      card.style.setProperty("--exit-ms", `${EXIT_MS()}ms`);
+
+      const iconSrc = giftIcon || DEFAULT_GIFT_ICON;
+
+      card.innerHTML = `
+        <div class="bar"></div>
+        <div class="inner">
+          <div class="meta">
+            <span class="badge">
+              ${iconSrc ? `<img class="gifticon" src="${iconSrc}" alt="gift" />` : `🎁`}
+              <span><span class="uname">${sanitize(username || "Someone")}</span> mengirim <b>${sanitize(giftName||"gift")}</b></span>
+            </span>
+            <span class="badge">Question Time ✨</span>
+          </div>
+          <div class="qtext">${sanitize(question)}</div>
+          <div class="hint">${sanitize(HINT_TEXT)}</div>
+        </div>
+        <div class="progress"><i></i></div>
+      `;
+      return card;
+    }
+
+    function spawnCard(info){
+      activeCards++;
+      const card = createCardElement(info);
+      stackEl.appendChild(card);
+
+      const total = CARD_LIFE_MS();
+      setTimeout(() => {
+        // cleanup saat selesai
+        card.remove();
+        activeCards = Math.max(0, activeCards - 1);
+        pump(); // ambil dari queue kalau ada
+      }, total + 40);
+    }
+
+    function sanitize(s){
+      return String(s)
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;");
+    }
+
+    function CARD_LIFE_MS(){
+      const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--card-life-ms"));
+      return isNaN(v) ? 5200 : v;
+    }
+    function ENTER_MS(){
+      const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--enter-ms"));
+      return isNaN(v) ? 700 : v;
+    }
+    function EXIT_MS(){
+      const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--exit-ms"));
+      return isNaN(v) ? 500 : v;
+    }
+
+    /**********************
+     * SOCKET + HANDLER
+     **********************/
+    const socket = io(SOCKET_URL, { transports:["websocket"] });
+
+    socket.on("connect", () => {
+      statusEl.textContent = `✅ connected (${socket.id})`;
+      statusEl.classList.remove("err"); statusEl.classList.add("ok");
+    });
+    socket.on("disconnect", (r) => {
+      statusEl.textContent = `⚠️ disconnected: ${r}`;
+      statusEl.classList.remove("ok"); statusEl.classList.add("err");
+    });
+    socket.on("connect_error", (e) => {
+      statusEl.textContent = `❌ connect error: ${e?.message || e}`;
+      statusEl.classList.remove("ok"); statusEl.classList.add("err");
+    });
+
+    /* Pola 1: server kirim universal {event, data} */
+    socket.on("message", (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      const { event, data } = payload;
+      if (isGiftEvent(event, data)) handleGift(data);
+    });
+
+    /* Pola 2: server emit langsung 'gift', payload bebas */
+    socket.on("gift", (data) => handleGift(data));
+
+    function isGiftEvent(event, data){
+      if (!event) return false;
+      const e = String(event).toLowerCase();
+      // fleksibel: dukung berbagai nama event
+      return ["gift","gifts","tiktok-gift","donation","tip"].includes(e);
+    }
+
+    /* Normalisasi payload agar fleksibel */
+    function parseGiftPayload(data){
+      const d = data || {};
+      const username = d.username || d.user || d.sender || d.name || "Someone";
+      const giftName = d.giftName || d.gift || d.item || d.product || d.type || "gift";
+      const giftIcon = d.giftIcon || d.icon || d.image || "";
+      const count = d.count || d.quantity || 1;
+      return { username, giftName, giftIcon, count };
+    }
+
+    function handleGift(raw){
+      const g = parseGiftPayload(raw);
+
+      // Untuk gift multiple / streak, dorong beberapa pertanyaan (dibatasi queue)
+      const times = Math.min(Math.max(1, parseInt(g.count) || 1), 5); // antirempong: max 5 kartu
+      for (let i=0; i<times; i++){
+        pushQueue({
+          username: g.username,
+          giftName: g.giftName,
+          giftIcon: g.giftIcon,
+          question: pickQuestion(),
+        });
+      }
+    }
+
+    /**********************
+     * TEST MANUAL (OBS Preview):
+     * G = satu gift random
+     * H = tiga gift streak
+     **********************/
+    window.addEventListener("keydown", (e)=>{
+      const k = e.key.toLowerCase();
+      if (k === "g"){
+        handleGift({ username:"ViewerChan", giftName:"Rose", count:1 });
+      }
+      if (k === "h"){
+        handleGift({ username:"Supporter", giftName:"Galaxy", count:3 });
+      }
+    });
+  </script>
+</body>
+</html>
