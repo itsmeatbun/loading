@@ -2,20 +2,21 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8" />
-  <title>Gift → Question Cards Overlay</title>
+  <title>Gift → Question Cards Overlay (Queued)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="transparent" />
   <style>
     :root{
-      /* Tuning */
-      --card-life-ms: 5200;        /* total durasi 1 kartu di layar */
-      --enter-ms: 700;             /* durasi animasi masuk */
-      --exit-ms: 500;              /* durasi animasi keluar */
-      --max-on-screen: 3;          /* batas kartu aktif bersamaan */
-      --queue-size: 30;            /* maksimal antrian */
-      --stack-gap: 12px;           /* jarak antar kartu saat stack */
-      --safe-margin-x: 6vw;        /* area aman kiri/kanan */
-      --safe-margin-bottom: 3vh;   /* jarak dari bawah */
+      /* Tuning utama */
+      --card-life-ms: 11000;       /* total durasi kartu di layar (lebih lama) */
+      --enter-ms: 900;             /* animasi masuk */
+      --exit-ms: 700;              /* animasi keluar */
+      --next-delay-ms: 700;        /* jeda sebelum kartu berikutnya dipanggil */
+      --max-on-screen: 1;          /* PENTING: hanya 1 kartu di layar */
+      --queue-size: 50;            /* maksimal antrian */
+      --stack-gap: 12px;
+      --safe-margin-x: 6vw;
+      --safe-margin-bottom: 3vh;
     }
 
     html,body{
@@ -26,7 +27,6 @@
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
 
-    /* Kanvas 9:16 transparan */
     .stage{
       position:fixed; inset:0;
       width:100vw; height:100vh;
@@ -35,8 +35,6 @@
       pointer-events:none;
       z-index: 9999;
     }
-
-    /* Container stack dari bawah */
     .stack{
       position:absolute;
       left:50%;
@@ -45,31 +43,26 @@
       width: clamp(260px, 72vw, 560px);
       max-width: calc(100vw - (var(--safe-margin-x)*2));
       display:flex;
-      flex-direction:column-reverse; /* kartu baru muncul paling bawah */
+      flex-direction:column-reverse;
       align-items:center;
       gap: var(--stack-gap);
       padding: 0 var(--safe-margin-x);
     }
 
-    /* Kartu pertanyaan */
     .qcard{
       position:relative;
       width:100%;
       pointer-events:none;
       color:#fff;
-      /* Glassmorphism */
-      background: radial-gradient(120% 140% at 10% 10%, rgba(255,255,255,.12), rgba(255,255,255,.06)) ,
+      background: radial-gradient(120% 140% at 10% 10%, rgba(255,255,255,.12), rgba(255,255,255,.06)),
                   linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.05));
       border: 1px solid rgba(255,255,255,.22);
-      box-shadow:
-        0 8px 28px rgba(0,0,0,.35),
-        inset 0 0 0 1px rgba(255,255,255,.06);
+      box-shadow: 0 8px 28px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06);
       backdrop-filter: blur(10px) saturate(120%);
       -webkit-backdrop-filter: blur(10px) saturate(120%);
       border-radius: 18px;
       overflow:hidden;
 
-      /* Animations */
       opacity:0;
       transform: translateY(30%) scale(.96);
       animation:
@@ -77,7 +70,6 @@
         floaty calc(var(--card-life-ms) - var(--enter-ms) - var(--exit-ms)) ease-in-out var(--enter-ms) forwards,
         exitDown var(--exit-ms) cubic-bezier(.5,0,.9,.2) calc(var(--card-life-ms) - var(--exit-ms)) forwards;
     }
-
     .qcard .bar{
       position:absolute; inset:0;
       background:
@@ -86,33 +78,21 @@
       opacity:.55;
       pointer-events:none;
     }
-
-    .qcard .inner{
-      position:relative;
-      padding: 16px 18px 14px 18px;
-    }
-
+    .qcard .inner{ position:relative; padding: 16px 18px 14px 18px; }
     .qcard .meta{
       display:flex; align-items:center; gap:10px;
       font-weight:700; font-size:13px; letter-spacing:.2px;
       text-shadow: 0 2px 10px rgba(0,0,0,.35);
       opacity:.95;
     }
-
     .badge{
       display:inline-flex; align-items:center; gap:6px;
-      padding: 6px 10px;
-      border-radius: 999px;
+      padding: 6px 10px; border-radius: 999px;
       background: rgba(0,0,0,.35);
       border: 1px solid rgba(255,255,255,.18);
       backdrop-filter: blur(6px);
     }
-
-    .gifticon{
-      width:18px; height:18px; object-fit:contain;
-      filter: drop-shadow(0 2px 6px rgba(0,0,0,.35));
-    }
-
+    .gifticon{ width:18px; height:18px; object-fit:contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.35)); }
     .uname{ font-weight:800; }
 
     .qtext{
@@ -122,17 +102,11 @@
       font-size: clamp(18px, 3.6vw, 28px);
       text-shadow: 0 3px 18px rgba(0,0,0,.45);
     }
-
-    .hint{
-      margin-top:8px;
-      font-size:12px; opacity:.9; font-weight:600;
-      letter-spacing:.25px;
-    }
+    .hint{ margin-top:8px; font-size:12px; opacity:.9; font-weight:600; letter-spacing:.25px; }
 
     .progress{
       position:absolute; left:0; right:0; bottom:0;
-      height:4px; overflow:hidden;
-      background: rgba(255,255,255,.12);
+      height:4px; overflow:hidden; background: rgba(255,255,255,.12);
     }
     .progress > i{
       display:block; height:100%;
@@ -142,7 +116,6 @@
       filter: saturate(120%);
     }
 
-    /* Status bubble */
     .status{
       position:fixed; left:10px; top:10px;
       font:600 12px ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;
@@ -154,7 +127,6 @@
     .status.ok{ background: rgba(4,120,87,.35); }
     .status.err{ background: rgba(185,28,28,.45); }
 
-    /* Animations */
     @keyframes enterUp{
       0%{ opacity:0; transform: translateY(30%) scale(.96) }
       60%{ opacity:1; transform: translateY(-6%) scale(1.01) }
@@ -169,14 +141,8 @@
       0%{ opacity:1; transform: translateY(0%) scale(1) }
       100%{ opacity:0; transform: translateY(15%) scale(.98) }
     }
-    @keyframes prog{
-      0%{ width: 100% }
-      100%{ width: 0% }
-    }
-    @keyframes hue{
-      0%{ filter: hue-rotate(0deg) }
-      100%{ filter: hue-rotate(360deg) }
-    }
+    @keyframes prog{ 0%{ width: 100% } 100%{ width: 0% } }
+    @keyframes hue{ 0%{ filter: hue-rotate(0deg) } 100%{ filter: hue-rotate(360deg) } }
   </style>
 </head>
 <body>
@@ -185,15 +151,10 @@
   </div>
   <div class="status" id="status">⏳ connecting…</div>
 
-  <!-- Socket.IO -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script>
-    /**********************
-     * KONFIGURASI
-     **********************/
+    /********** KONFIG **********/
     const SOCKET_URL = "http://localhost:62025";
-
-    /* Bank pertanyaan (bisa kamu ganti sesuka hati) */
     const QUESTIONS = [
       "Kalau kamu jadi makanan, kamu cocoknya rasa apa & kenapa?",
       "Apa film/animanga comfort kamu akhir-akhir ini?",
@@ -206,22 +167,27 @@
       "Apa barang paling nggak berguna tapi kamu sayang?",
       "Momen kecil hari ini yang bikin senyum?"
     ];
-
-    /* Anti-ulang pertanyaan terakhir N */
     const RECENT_NO_REPEAT = 5;
-
-    /* Opsi tampilan kecil */
     const HINT_TEXT = "Jawab di chat ya 💬";
-    const DEFAULT_GIFT_ICON = ""; // opsional: taruh url icon gift di sini
+    const DEFAULT_GIFT_ICON = "";
 
-    /**********************
-     * STATE
-     **********************/
+    /********** STATE **********/
     const stackEl = document.getElementById("stack");
     const statusEl = document.getElementById("status");
-    let recentQ = [];
     const queue = [];
     let activeCards = 0;
+    let recentQ = [];
+
+    function cssNum(varName, fallback){
+      const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue(varName));
+      return isNaN(v) ? fallback : v;
+    }
+    const CARD_LIFE_MS = () => cssNum("--card-life-ms", 11000);
+    const ENTER_MS     = () => cssNum("--enter-ms", 900);
+    const EXIT_MS      = () => cssNum("--exit-ms", 700);
+    const NEXT_DELAY   = () => cssNum("--next-delay-ms", 700);
+    const MAX_ONSCREEN = () => cssNum("--max-on-screen", 1);
+    const MAX_QUEUE    = () => cssNum("--queue-size", 50);
 
     function pickQuestion(){
       const pool = QUESTIONS.filter(q => !recentQ.includes(q));
@@ -230,25 +196,22 @@
       if (recentQ.length > RECENT_NO_REPEAT) recentQ.shift();
       return q;
     }
+    function sanitize(s){
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
 
     function pushQueue(item){
-      if (queue.length >= parseInt(getComputedStyle(document.documentElement).getPropertyValue("--queue-size"))){
-        queue.shift(); // buang paling lama biar tetap mengalir
-      }
+      if (queue.length >= MAX_QUEUE()) queue.shift();
       queue.push(item);
       pump();
     }
 
-    function maxOnScreen(){
-      const n = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--max-on-screen"));
-      return isNaN(n) ? 3 : n;
-    }
-
+    /* PENTING: benar-benar satu-per-satu */
     function pump(){
-      while (activeCards < maxOnScreen() && queue.length){
-        const data = queue.shift();
-        spawnCard(data);
-      }
+      if (activeCards >= MAX_ONSCREEN()) return;
+      const data = queue.shift();
+      if (!data) return;
+      spawnCard(data);
     }
 
     function createCardElement({username, giftName, giftIcon, question}){
@@ -279,42 +242,21 @@
     }
 
     function spawnCard(info){
-      activeCards++;
+      activeCards = 1;
       const card = createCardElement(info);
       stackEl.appendChild(card);
 
       const total = CARD_LIFE_MS();
+      // hapus setelah lifecycle selesai
       setTimeout(() => {
-        // cleanup saat selesai
         card.remove();
-        activeCards = Math.max(0, activeCards - 1);
-        pump(); // ambil dari queue kalau ada
+        activeCards = 0;
+        // beri jeda kecil sebelum ambil kartu berikutnya
+        setTimeout(pump, NEXT_DELAY());
       }, total + 40);
     }
 
-    function sanitize(s){
-      return String(s)
-        .replace(/&/g,"&amp;")
-        .replace(/</g,"&lt;")
-        .replace(/>/g,"&gt;");
-    }
-
-    function CARD_LIFE_MS(){
-      const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--card-life-ms"));
-      return isNaN(v) ? 5200 : v;
-    }
-    function ENTER_MS(){
-      const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--enter-ms"));
-      return isNaN(v) ? 700 : v;
-    }
-    function EXIT_MS(){
-      const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--exit-ms"));
-      return isNaN(v) ? 500 : v;
-    }
-
-    /**********************
-     * SOCKET + HANDLER
-     **********************/
+    /********** SOCKET **********/
     const socket = io(SOCKET_URL, { transports:["websocket"] });
 
     socket.on("connect", () => {
@@ -330,38 +272,30 @@
       statusEl.classList.remove("ok"); statusEl.classList.add("err");
     });
 
-    /* Pola 1: server kirim universal {event, data} */
+    // Pola 1: universal {event, data}
     socket.on("message", (payload) => {
       if (!payload || typeof payload !== "object") return;
       const { event, data } = payload;
       if (isGiftEvent(event, data)) handleGift(data);
     });
-
-    /* Pola 2: server emit langsung 'gift', payload bebas */
+    // Pola 2: emit langsung 'gift'
     socket.on("gift", (data) => handleGift(data));
 
-    function isGiftEvent(event, data){
+    function isGiftEvent(event){
       if (!event) return false;
       const e = String(event).toLowerCase();
-      // fleksibel: dukung berbagai nama event
       return ["gift","gifts","tiktok-gift","donation","tip"].includes(e);
     }
-
-    /* Normalisasi payload agar fleksibel */
-    function parseGiftPayload(data){
-      const d = data || {};
+    function parseGiftPayload(d = {}){
       const username = d.username || d.user || d.sender || d.name || "Someone";
       const giftName = d.giftName || d.gift || d.item || d.product || d.type || "gift";
       const giftIcon = d.giftIcon || d.icon || d.image || "";
       const count = d.count || d.quantity || 1;
       return { username, giftName, giftIcon, count };
     }
-
     function handleGift(raw){
       const g = parseGiftPayload(raw);
-
-      // Untuk gift multiple / streak, dorong beberapa pertanyaan (dibatasi queue)
-      const times = Math.min(Math.max(1, parseInt(g.count) || 1), 5); // antirempong: max 5 kartu
+      const times = Math.min(Math.max(1, parseInt(g.count) || 1), 5);
       for (let i=0; i<times; i++){
         pushQueue({
           username: g.username,
@@ -372,19 +306,11 @@
       }
     }
 
-    /**********************
-     * TEST MANUAL (OBS Preview):
-     * G = satu gift random
-     * H = tiga gift streak
-     **********************/
+    /********** TEST MANUAL **********/
     window.addEventListener("keydown", (e)=>{
       const k = e.key.toLowerCase();
-      if (k === "g"){
-        handleGift({ username:"ViewerChan", giftName:"Rose", count:1 });
-      }
-      if (k === "h"){
-        handleGift({ username:"Supporter", giftName:"Galaxy", count:3 });
-      }
+      if (k === "g"){ handleGift({ username:"ViewerChan", giftName:"Rose", count:1 }); }
+      if (k === "h"){ handleGift({ username:"Supporter", giftName:"Galaxy", count:3 }); }
     });
   </script>
 </body>
