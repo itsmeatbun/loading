@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Chat Command → Question Cards (Queued)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="transparent" />
+  <style>
+    :root{
+      /* Tuning utama */
+      --card-life-ms: 11000;       /* total durasi kartu di layar */
+      --enter-ms: 900;             /* animasi masuk */
+      --exit-ms: 700;              /* animasi keluar */
+      --next-delay-ms: 700;        /* jeda sebelum kartu berikutnya */
+      --max-on-screen: 1;          /* hanya 1 kartu di layar */
+      --queue-size: 80;            /* maksimal panjang antrian */
+      --stack-gap: 12px;
+      --safe-margin-x: 6vw;
+      --safe-margin-bottom: 3vh;
+    }
+
+    html,body{
+      width:100%; height:100%;
+      margin:0; padding:0;
+      background:transparent;
+      overflow:hidden;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+
+    .stage{
+      position:fixed; inset:0;
+      width:100vw; height:100vh;
+      aspect-ratio: 9/16;
+      background:transparent;
+      pointer-events:none;
+      z-index: 9999;
+    }
+    .stack{
+      position:absolute;
+      left:50%;
+      bottom: var(--safe-margin-bottom);
+      transform: translateX(-50%);
+      width: clamp(260px, 72vw, 560px);
+      max-width: calc(100vw - (var(--safe-margin-x)*2));
+      display:flex;
+      flex-direction:column-reverse;
+      align-items:center;
+      gap: var(--stack-gap);
+      padding: 0 var(--safe-margin-x);
+    }
+
+    .qcard{
+      position:relative;
+      width:100%;
+      pointer-events:none;
+      color:#fff;
+      background: radial-gradient(120% 140% at 10% 10%, rgba(255,255,255,.12), rgba(255,255,255,.06)),
+                  linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.05));
+      border: 1px solid rgba(255,255,255,.22);
+      box-shadow: 0 8px 28px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06);
+      backdrop-filter: blur(10px) saturate(120%);
+      -webkit-backdrop-filter: blur(10px) saturate(120%);
+      border-radius: 18px;
+      overflow:hidden;
+
+      opacity:0;
+      transform: translateY(30%) scale(.96);
+      animation:
+        enterUp var(--enter-ms) cubic-bezier(.2,.9,.25,1.0) forwards,
+        floaty calc(var(--card-life-ms) - var(--enter-ms) - var(--exit-ms)) ease-in-out var(--enter-ms) forwards,
+        exitDown var(--exit-ms) cubic-bezier(.5,0,.9,.2) calc(var(--card-life-ms) - var(--exit-ms)) forwards;
+    }
+    .qcard .bar{
+      position:absolute; inset:0;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.20), rgba(255,255,255,0) 50%),
+        radial-gradient(60% 140% at 10% 0%, rgba(99,102,241,.35), rgba(236,72,153,.28) 48%, rgba(14,165,233,.22) 90%);
+      opacity:.55;
+      pointer-events:none;
+    }
+    .qcard .inner{ position:relative; padding: 16px 18px 14px 18px; }
+    .qcard .meta{
+      display:flex; align-items:center; gap:10px;
+      font-weight:700; font-size:13px; letter-spacing:.2px;
+      text-shadow: 0 2px 10px rgba(0,0,0,.35);
+      opacity:.95;
+    }
+    .badge{
+      display:inline-flex; align-items:center; gap:6px;
+      padding: 6px 10px; border-radius: 999px;
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.18);
+      backdrop-filter: blur(6px);
+    }
+    .uname{ font-weight:800; }
+
+    .qtext{
+      margin-top:10px;
+      font-weight:800;
+      line-height:1.2;
+      font-size: clamp(18px, 3.6vw, 28px);
+      text-shadow: 0 3px 18px rgba(0,0,0,.45);
+    }
+    .hint{ margin-top:8px; font-size:12px; opacity:.9; font-weight:600; letter-spacing:.25px; }
+
+    .progress{
+      position:absolute; left:0; right:0; bottom:0;
+      height:4px; overflow:hidden; background: rgba(255,255,255,.12);
+    }
+    .progress > i{
+      display:block; height:100%;
+      background: linear-gradient(90deg, #60a5fa, #a78bfa, #f472b6, #22d3ee);
+      background-size: 200% 100%;
+      animation: prog var(--card-life-ms) linear forwards, hue 8s linear infinite;
+      filter: saturate(120%);
+    }
+
+    .status{
+      position:fixed; left:10px; top:10px;
+      font:600 12px ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      color:#fff; background:rgba(0,0,0,.35);
+      padding:6px 10px; border-radius:10px;
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      pointer-events:none; z-index:10000;
+    }
+    .status.ok{ background: rgba(4,120,87,.35); }
+    .status.err{ background: rgba(185,28,28,.45); }
+
+    @keyframes enterUp{
+      0%{ opacity:0; transform: translateY(30%) scale(.96) }
+      60%{ opacity:1; transform: translateY(-6%) scale(1.01) }
+      100%{ opacity:1; transform: translateY(0%) scale(1) }
+    }
+    @keyframes floaty{
+      0%{ transform: translateY(0%) }
+      50%{ transform: translateY(-3%) }
+      100%{ transform: translateY(0%) }
+    }
+    @keyframes exitDown{
+      0%{ opacity:1; transform: translateY(0%) scale(1) }
+      100%{ opacity:0; transform: translateY(15%) scale(.98) }
+    }
+    @keyframes prog{ 0%{ width: 100% } 100%{ width: 0% } }
+    @keyframes hue{ 0%{ filter: hue-rotate(0deg) } 100%{ filter: hue-rotate(360deg) } }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <div class="stack" id="stack"></div>
+  </div>
+  <div class="status" id="status">⏳ connecting…</div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script>
+    /********** KONFIG **********/
+    const SOCKET_URL = "http://localhost:62025";
+
+    /* Perintah yang memicu kartu */
+    const COMMANDS = ["!pertanyaan", "!q", "!question"];
+
+    /* Bank pertanyaan: bebas edit */
+    const QUESTIONS = [
+    "Kalau kamu jadi makanan, kamu cocoknya rasa apa & kenapa?",
+  "Apa film/animanga comfort kamu akhir-akhir ini?",
+  "Team kucing, anjing, atau ular hijau imut? Defend your choice!",
+  "Guilty pleasure snack kamu apa?",
+  "Kalau bisa teleport 1x hari ini, kamu ke mana & ngapain?",
+  "Sebut 1 skill random yang pengen banget kamu kuasai!",
+  "Satu lagu wajib yang bikin mood naik?",
+  "Pagi orangnya kopi, teh, atau air putih doang?",
+  "Apa barang paling nggak berguna tapi kamu sayang?",
+  "Momen kecil hari ini yang bikin senyum?",
+  "Kalau kamu bisa hidup di dunia anime, pilih mana?",
+  "Satu makanan yang rela kamu makan tiap hari?",
+  "Kalau disuruh jadi hewan peliharaan, mau jadi apa?",
+  "Pernah ketawa sampai nangis? Ceritain dikit!",
+  "Lebih pilih bisa baca pikiran atau bisa invisible?",
+  "Kalau bisa libur seminggu gratis, mau ke mana?",
+  "Satu kebiasaan kecil yang bikin kamu nyaman?",
+  "Kalau jadi superhero, kekuatan pertamamu apa?",
+  "Apa minuman paling aneh yang pernah kamu coba?",
+  "Sebut 3 hal yang bikin kamu bahagia sekarang.",
+  "Kalau jadi karakter game, job/class kamu apa?",
+  "Momen paling malu tapi lucu apa?",
+  "Lebih suka sunrise atau sunset?",
+  "Kalau kamu punya robot pribadi, suruh apa dulu?",
+  "Satu barang wajib kalau lagi traveling?",
+  "Kalau jadi artis, pengen dikenal karena apa?",
+  "Makanan paling overrated menurutmu?",
+  "Lebih pilih tidur siang lama atau tidur malam cepat?",
+  "Apa hobi kecil yang bikin kamu betah berjam-jam?",
+  "Kalau bisa ketemu diri kamu umur 10 tahun, mau ngomong apa?",
+  "Satu karakter fiksi yang pengen kamu jadiin sahabat?",
+  "Apa emoji favoritmu buat dipakai di chat?",
+  "Kalau punya unlimited voucher, belanja apa dulu?",
+  "Pernah ketiduran di tempat paling random?",
+  "Satu skill random yang kamu kuasai?",
+  "Kalau bisa langsung jago bahasa apa, pilih mana?",
+  "Sebut makanan masa kecil yang bikin nostalgia.",
+  "Kalau jadi NPC game, kamu bakal ngomong apa tiap interaksi?",
+  "Lebih pilih bisa nyanyi bagus atau jago gambar?",
+  "Kalau lagi bete, biasanya kamu ngapain?",
+  "Sebut 3 hal random yang ada di dekat kamu sekarang.",
+  "Apa hadiah kecil yang pernah bikin kamu super senang?",
+  "Kalau harus ganti nama, mau jadi apa?",
+  "Lebih pilih musim panas atau musim hujan?",
+  "Kalau punya satu jam tambahan tiap hari, dipakai buat apa?",
+  "Pernah ngalamin deja vu aneh?",
+  "Kalau punya toko, mau jual apa?",
+  "Apa drama/series terakhir yang bikin nagih?",
+  "Kalau bisa main alat musik instan, pilih apa?",
+  "Satu kata yang menggambarkan mood kamu sekarang?",
+  "Kalau jadi alien, mau planet kayak apa?",
+  "Satu aplikasi yang paling sering kamu buka?",
+  "Lebih suka jalan kaki malam atau pagi?",
+  "Apa dessert favoritmu?",
+  "Kalau punya sayap, bentuknya kayak apa?",
+  "Apa genre musik yang paling bikin tenang?",
+  "Lebih pilih ponsel kecil jadul atau tablet segede TV?",
+  "Satu hal kecil yang kamu syukuri hari ini?",
+  "Kalau bisa buka usaha kecil, usaha apa?",
+  "Makanan yang paling sering kamu craving?",
+  "Kalau punya teleport door, taruh ke mana?",
+  "Apa barang yang kamu simpan tapi nggak pernah dipakai?",
+  "Kalau jadi karakter horor, survive atau jadi korban duluan?",
+  "Lebih pilih makan pedas banget atau asin banget?",
+  "Kalau bisa tukar hidup sehari sama tokoh terkenal, siapa?",
+  "Sebut satu quote random yang kamu inget.",
+  "Lebih suka makan manis atau asin?",
+  "Kalau punya hewan fantasi, mau bentuk apa?",
+  "Apa kebiasaan kecil unikmu?",
+  "Kalau dunia tanpa internet 1 minggu, kamu ngapain?",
+  "Satu game yang pengen kamu mainin lagi dari nol?",
+  "Lebih pilih es krim rasa unik atau klasik?",
+  "Kalau bisa jadi bos besar, bidang apa?",
+  "Apa benda paling sering kamu pegang tiap hari?",
+  "Sebut guilty pleasure drama/film kamu.",
+  "Kalau bisa ganti rambut seketika, warna apa?",
+  "Lebih pilih hidup di kota besar atau desa tenang?",
+  "Apa suara yang paling bikin kamu relax?",
+  "Kalau kamu punya magic spell, buat apa dulu?",
+  "Momen kecil random yang bikin kamu ngakak?",
+  "Lebih suka tidur di kasur empuk atau sofa cozy?",
+  "Kalau punya kapal, namanya apa?",
+  "Apa makanan paling underrated menurutmu?",
+  "Kalau bisa ganti mata uang dunia, jadi apa?",
+  "Apa benda paling random di tas kamu?",
+  "Kalau jadi karakter kartun, gaya siapa?",
+  "Apa skill aneh yang kamu pengen coba?",
+  "Lebih pilih bisa terbang rendah atau lari super cepat?",
+  "Kalau bisa kasih hadiah ke semua orang di live ini, apa?",
+  "Apa barang kecil yang bikin kamu merasa 'aman'?",
+  "Kalau jadi karakter RPG, weapon pilihanmu?",
+  "Apa kebiasaan random teman yang lucu?",
+  "Lebih suka tidur cepat atau begadang?",
+  "Kalau punya theme song pribadi, lagunya apa?",
+  "Apa makanan yang dulu dibenci tapi sekarang suka?",
+  "Kalau bisa punya 3 klon, suruh mereka ngapain?",
+  "Apa emoji yang paling sering dipake salah kaprah?",
+  "Kalau bisa kasih nama ke bintang, apa?",
+  "Apa makanan paling aneh yang pernah kamu coba?",
+  "Kalau bisa time travel sekali, pilih ke masa depan atau masa lalu?",
+  "Apa benda kecil yang selalu bikin kamu senyum?",
+  "Kalau kamu bikin cult random, temanya apa?",
+  "Apa minuman paling favorit kamu all time?",
+  "Kalau semua orang di dunia bisa dengar kamu 5 detik, kamu ngomong apa?",
+  "Apa hal konyol yang pengen kamu coba tanpa ketahuan?",
+  "Kalau bisa dapet skill game ke dunia nyata, apa?",
+    ];
+
+    const HINT_TEXT = "Jawab di chat ya 💬";
+    const RECENT_NO_REPEAT = 5;
+
+    /* Anti-spam ringan per user (cooldown detik) */
+    const USER_COOLDOWN_MS = 5000;
+
+    /********** STATE **********/
+    const stackEl = document.getElementById("stack");
+    const statusEl = document.getElementById("status");
+    const queue = [];
+    let activeCards = 0;
+    let recentQ = [];
+    const lastUse = new Map(); // username -> timestamp
+
+    function cssNum(varName, fallback){
+      const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue(varName));
+      return isNaN(v) ? fallback : v;
+    }
+    const CARD_LIFE_MS = () => cssNum("--card-life-ms", 11000);
+    const ENTER_MS     = () => cssNum("--enter-ms", 900);
+    const EXIT_MS      = () => cssNum("--exit-ms", 700);
+    const NEXT_DELAY   = () => cssNum("--next-delay-ms", 700);
+    const MAX_ONSCREEN = () => cssNum("--max-on-screen", 1);
+    const MAX_QUEUE    = () => cssNum("--queue-size", 80);
+
+    function pickQuestion(){
+      const pool = QUESTIONS.filter(q => !recentQ.includes(q));
+      const q = pool.length ? pool[Math.floor(Math.random()*pool.length)] : QUESTIONS[Math.floor(Math.random()*QUESTIONS.length)];
+      recentQ.push(q);
+      if (recentQ.length > RECENT_NO_REPEAT) recentQ.shift();
+      return q;
+    }
+    function sanitize(s){
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    function pushQueue(item){
+      if (queue.length >= MAX_QUEUE()) queue.shift();
+      queue.push(item);
+      pump();
+    }
+
+    /* Satu-per-satu */
+    function pump(){
+      if (activeCards >= MAX_ONSCREEN()) return;
+      const data = queue.shift();
+      if (!data) return;
+      spawnCard(data);
+    }
+
+    function createCardElement({username, question}){
+      const card = document.createElement("div");
+      card.className = "qcard";
+      card.style.setProperty("--card-life-ms", `${CARD_LIFE_MS()}ms`);
+      card.style.setProperty("--enter-ms", `${ENTER_MS()}ms`);
+      card.style.setProperty("--exit-ms", `${EXIT_MS()}ms`);
+
+      card.innerHTML = `
+        <div class="bar"></div>
+        <div class="inner">
+          <div class="meta">
+            <span class="badge">💬 Command</span>
+            <span class="badge"><span class="uname">${sanitize(username || "Viewer")}</span> minta pertanyaan</span>
+          </div>
+          <div class="qtext">${sanitize(question)}</div>
+          <div class="hint">${sanitize(HINT_TEXT)}</div>
+        </div>
+        <div class="progress"><i></i></div>
+      `;
+      return card;
+    }
+
+    function spawnCard(info){
+      activeCards = 1;
+      const card = createCardElement(info);
+      stackEl.appendChild(card);
+
+      const total = CARD_LIFE_MS();
+      setTimeout(() => {
+        card.remove();
+        activeCards = 0;
+        setTimeout(pump, NEXT_DELAY());
+      }, total + 40);
+    }
+
+    /********** CHAT PARSER **********/
+    function extractText(payload){
+      // Coba beberapa kemungkinan field
+      return payload?.comment ?? payload?.text ?? payload?.message ?? payload?.body ?? "";
+    }
+    function extractUser(payload){
+      return payload?.username ?? payload?.user ?? payload?.sender ?? payload?.name ?? payload?.author ?? "Viewer";
+    }
+    function hasCommand(textRaw){
+      const t = String(textRaw || "").toLowerCase();
+      return COMMANDS.some(cmd => t.includes(cmd));
+    }
+
+    /* Cooldown per user biar nggak diserbu satu orang */
+    function allowUser(username){
+      const now = Date.now();
+      const last = lastUse.get(username) || 0;
+      if (now - last < USER_COOLDOWN_MS) return false;
+      lastUse.set(username, now);
+      return true;
+    }
+
+    /********** SOCKET **********/
+    const socket = io(SOCKET_URL, { transports:["websocket"] });
+
+    socket.on("connect", () => {
+      statusEl.textContent = `✅ connected (${socket.id})`;
+      statusEl.classList.remove("err"); statusEl.classList.add("ok");
+    });
+    socket.on("disconnect", (r) => {
+      statusEl.textContent = `⚠️ disconnected: ${r}`;
+      statusEl.classList.remove("ok"); statusEl.classList.add("err");
+    });
+    socket.on("connect_error", (e) => {
+      statusEl.textContent = `❌ connect error: ${e?.message || e}`;
+      statusEl.classList.remove("ok"); statusEl.classList.add("err");
+    });
+
+    /* Pola 1: universal {event, data} */
+    socket.on("message", (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      const { event, data } = payload;
+      if (String(event || "").toLowerCase() !== "chat") return;
+      onIncomingChat(data);
+    });
+
+    /* Pola 2: emit langsung 'chat', payload bisa {username, comment} */
+    socket.on("chat", (chat) => onIncomingChat(chat));
+
+    function onIncomingChat(obj){
+      const text = extractText(obj);
+      if (!hasCommand(text)) return;
+
+      const username = extractUser(obj);
+      if (!allowUser(username)) return;
+
+      pushQueue({
+        username,
+        question: pickQuestion(),
+      });
+    }
+
+    /********** TEST MANUAL **********/
+    window.addEventListener("keydown", (e)=>{
+      const k = e.key.toLowerCase();
+      if (k === "p"){ // P = test command
+        onIncomingChat({ username:"Tester", comment:"!pertanyaan dong" });
+      }
+    });
+  </script>
+</body>
+</html>
