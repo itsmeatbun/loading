@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Chat Command → Fortune Cards (Queued)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="transparent" />
+  <style>
+    :root{
+      --card-life-ms: 11000;       /* durasi kartu tampil */
+      --enter-ms: 900;
+      --exit-ms: 700;
+      --next-delay-ms: 700;
+      --max-on-screen: 1;
+      --queue-size: 100;
+      --safe-margin-x: 6vw;
+      --safe-margin-bottom: 3vh;
+    }
+
+    html,body{
+      width:100%; height:100%;
+      margin:0; padding:0;
+      background:transparent;
+      overflow:hidden;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+
+    .stage{
+      position:fixed; inset:0;
+      width:100vw; height:100vh;
+      aspect-ratio: 9/16;
+      pointer-events:none;
+      background:transparent;
+      z-index: 9999;
+    }
+    .stack{
+      position:absolute;
+      left:50%;
+      bottom: var(--safe-margin-bottom);
+      transform: translateX(-50%);
+      width: clamp(260px, 72vw, 560px);
+      max-width: calc(100vw - (var(--safe-margin-x)*2));
+      display:flex;
+      flex-direction:column-reverse;
+      align-items:center;
+      gap: 12px;
+      padding: 0 var(--safe-margin-x);
+    }
+
+    .card{
+      position:relative;
+      width:100%;
+      color:#fff;
+      pointer-events:none;
+      border-radius: 18px;
+      overflow:hidden;
+
+      background: radial-gradient(120% 140% at 10% 10%, rgba(255,255,255,.12), rgba(255,255,255,.06)),
+                  linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.05));
+      border: 1px solid rgba(255,255,255,.22);
+      box-shadow: 0 8px 28px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06);
+      backdrop-filter: blur(10px) saturate(120%);
+      -webkit-backdrop-filter: blur(10px) saturate(120%);
+
+      opacity:0;
+      transform: translateY(30%) scale(.96);
+      animation:
+        enterUp var(--enter-ms) cubic-bezier(.2,.9,.25,1.0) forwards,
+        floaty calc(var(--card-life-ms) - var(--enter-ms) - var(--exit-ms)) ease-in-out var(--enter-ms) forwards,
+        exitDown var(--exit-ms) cubic-bezier(.5,0,.9,.2) calc(var(--card-life-ms) - var(--exit-ms)) forwards;
+    }
+
+    .card .tint{
+      position:absolute; inset:0;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.20), rgba(255,255,255,0) 50%),
+        radial-gradient(60% 140% at 10% 0%, rgba(59,130,246,.35), rgba(236,72,153,.28) 48%, rgba(14,165,233,.22) 90%);
+      opacity:.55;
+    }
+
+    .inner{ position:relative; padding: 16px 18px 14px 18px; }
+    .meta{
+      display:flex; align-items:center; gap:10px;
+      font-weight:700; font-size:13px; letter-spacing:.2px;
+      text-shadow: 0 2px 10px rgba(0,0,0,.35);
+      opacity:.95;
+    }
+    .badge{
+      display:inline-flex; align-items:center; gap:6px;
+      padding: 6px 10px; border-radius: 999px;
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.18);
+      backdrop-filter: blur(6px);
+    }
+    .uname{ font-weight:800; }
+
+    .text{
+      margin-top:12px;
+      font-weight:800;
+      line-height:1.2;
+      font-size: clamp(18px, 3.6vw, 28px);
+      text-shadow: 0 3px 18px rgba(0,0,0,.45);
+    }
+
+    .progress{
+      position:absolute; left:0; right:0; bottom:0;
+      height:4px; overflow:hidden; background: rgba(255,255,255,.12);
+    }
+    .progress > i{
+      display:block; height:100%;
+      background: linear-gradient(90deg, #60a5fa, #a78bfa, #f472b6, #22d3ee);
+      background-size: 200% 100%;
+      animation: prog var(--card-life-ms) linear forwards, hue 8s linear infinite;
+      filter: saturate(120%);
+    }
+
+    .status{
+      position:fixed; left:10px; top:10px;
+      font:600 12px ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      color:#fff; background:rgba(0,0,0,.35);
+      padding:6px 10px; border-radius:10px;
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      pointer-events:none; z-index:10000;
+    }
+    .status.ok{ background: rgba(4,120,87,.35); }
+    .status.err{ background: rgba(185,28,28,.45); }
+
+    @keyframes enterUp{
+      0%{ opacity:0; transform: translateY(30%) scale(.96) }
+      60%{ opacity:1; transform: translateY(-6%) scale(1.01) }
+      100%{ opacity:1; transform: translateY(0%) scale(1) }
+    }
+    @keyframes floaty{
+      0%{ transform: translateY(0%) }
+      50%{ transform: translateY(-3%) }
+      100%{ transform: translateY(0%) }
+    }
+    @keyframes exitDown{
+      0%{ opacity:1; transform: translateY(0%) scale(1) }
+      100%{ opacity:0; transform: translateY(15%) scale(.98) }
+    }
+    @keyframes prog{ 0%{ width: 100% } 100%{ width: 0% } }
+    @keyframes hue{ 0%{ filter: hue-rotate(0deg) } 100%{ filter: hue-rotate(360deg) } }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="stack" id="stack"></div>
+  </div>
+  <div class="status" id="status">⏳ connecting…</div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script>
+    /********** KONFIG **********/
+    const SOCKET_URL = "http://localhost:62025";
+    const COMMANDS = ["!ramalan", "!fortune", "!f"];
+    const USER_COOLDOWN_MS = 5000;
+
+    const FORTUNES = [
+      "A surprise snack will find its way to you soon.",
+      "Tomorrow you’ll laugh at something very small.",
+      "Your crush will think about you tonight.",
+      "You’ll discover a new favorite drink this week.",
+      "A random stranger will brighten your day.",
+      "Luck will come in the form of free food.",
+      "Soon, you’ll get a compliment you didn’t expect.",
+      "A song stuck in your head will bring you good vibes.",
+      "Your wallet will cry, but your heart will be full.",
+      "Someone close is secretly planning something sweet for you.",
+      "Your next meal will taste better than you imagine.",
+      "Soon, a meme will make your entire day.",
+      "You’ll be someone’s reason to smile today.",
+      "Unexpected good news will arrive by message.",
+      "A little chaos will turn into fun memories.",
+      "You’ll sleep better than usual tonight.",
+      "Tomorrow, a color will remind you of someone.",
+      "Your phone battery will last surprisingly long.",
+      "You will find money in a random pocket soon.",
+      "A missed opportunity will circle back to you.",
+      "Someone will mention your name with a smile.",
+      "You’ll wake up earlier but feel more energetic.",
+      "An old song will bring new joy to you.",
+      "A random animal will make you laugh.",
+      "Your luck number today is hidden in your chat.",
+      "Soon, you’ll meet someone who shares your taste in music.",
+      "The universe will send you a small gift soon.",
+      "Your outfit will accidentally match with someone else’s.",
+      "Soon, you’ll taste something nostalgic.",
+      "A silly joke will stay in your mind all day.",
+      "Someone will remember you at the perfect time.",
+      "Today, your snack choice decides your mood.",
+      "You’ll get a lucky coincidence soon.",
+      "A surprise will come from the person you least expect.",
+      "Your future holds more naps than you think.",
+      "A cute emoji will brighten your chat soon.",
+      "Your vibe today attracts kindness.",
+      "Someone will screenshot your message today.",
+      "A forgotten item will suddenly appear again.",
+      "Soon, you’ll make a decision that feels just right.",
+      "Your lucky charm today is… your smile.",
+      "Someone will send you good energy secretly.",
+      "You’ll be the reason for a group laugh soon.",
+      "A craving will magically be satisfied.",
+      "Your future includes unexpected dance moves.",
+      "Soon, you’ll be tagged in something funny.",
+      "A random call/message will bring joy.",
+      "Your luck will come in small packages.",
+      "Today is the perfect day for a little mischief.",
+      "Someone is silently cheering for you.",
+      "Your heart will feel lighter tomorrow.",
+      "The weather will surprise you in a nice way.",
+      "A random number will repeat in your day.",
+      "Soon, you’ll find comfort in a silly object.",
+      "Your luck is hiding in your favorite song.",
+      "A silly mistake will lead to a funny story.",
+      "You’ll get extra attention without realizing.",
+      "A random video will inspire you today.",
+      "A new idea will pop up at midnight.",
+      "Soon, someone will treat you with food or drink.",
+      "You’ll bump into someone from the past soon.",
+      "Your luck today is connected to something pink.",
+      "A stranger’s smile will make your mood better.",
+      "Soon, you’ll say something that becomes an inside joke.",
+      "An unexpected win will be yours soon.",
+      "A delayed thing will finally arrive perfectly on time.",
+      "Today is a good day to trust your instincts.",
+      "You’ll soon laugh at your own typo.",
+      "The universe says: hydrate more, luck follows.",
+      "Your random humming will summon good vibes.",
+      "Someone will think of you while eating.",
+      "A tiny accident will turn into a happy twist.",
+      "Your energy will attract a small gift soon.",
+      "Soon, you’ll catch yourself smiling at nothing.",
+      "A smell will trigger a happy memory.",
+      "Your laughter today will double tomorrow.",
+      "Something lost will return to you soon.",
+      "Soon, you’ll say “wow” for no reason.",
+      "Your dream tonight will be oddly funny.",
+      "Luck will come disguised as laziness.",
+      "A cute sticker/emote will brighten your timeline.",
+      "Someone is going to copy your style soon.",
+      "You’ll be surprised by kindness this week.",
+      "Your name will be mentioned with affection soon.",
+      "The universe says: your playlist is magic today.",
+      "A snack craving will bring you luck.",
+      "Soon, someone will open up to you unexpectedly.",
+      "A silly thought will become a genius idea.",
+      "The next color you see will be your lucky one.",
+      "A lucky number will repeat twice today.",
+      "Your silence will speak louder than words soon.",
+      "Someone you miss will suddenly appear online.",
+      "The universe says: today you glow extra.",
+      "Your path will cross with fun chaos soon.",
+      "Something random today will feel meant to be.",
+      "A warm drink will solve a problem soon.",
+      "Someone is secretly inspired by you.",
+      "A joke will hit harder than expected.",
+      "Your heart is attracting small miracles now.",
+      "Soon, you’ll discover a new comfort place.",
+      "Your lucky charm today is… whatever’s in your pocket."
+    ];
+
+    /********** STATE **********/
+    const stackEl = document.getElementById("stack");
+    const statusEl = document.getElementById("status");
+    const queue = [];
+    let active = false;
+    const lastUse = new Map();
+
+    function cssNum(name, fallback){
+      const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue(name));
+      return isNaN(v) ? fallback : v;
+    }
+    const CARD_LIFE_MS = () => cssNum("--card-life-ms", 11000);
+    const ENTER_MS     = () => cssNum("--enter-ms", 900);
+    const EXIT_MS      = () => cssNum("--exit-ms", 700);
+    const NEXT_DELAY   = () => cssNum("--next-delay-ms", 700);
+    const MAX_QUEUE    = () => cssNum("--queue-size", 100);
+
+    const pick = arr => arr[Math.floor(Math.random()*arr.length)];
+    const sanitize = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+    function pushQueue(item){
+      if (queue.length >= MAX_QUEUE()) queue.shift();
+      queue.push(item);
+      pump();
+    }
+    function pump(){
+      if (active) return;
+      const data = queue.shift();
+      if (!data) return;
+      spawnCard(data);
+    }
+
+    function createCard({username, fortune}){
+      const el = document.createElement("div");
+      el.className = "card";
+      el.style.setProperty("--card-life-ms", `${CARD_LIFE_MS()}ms`);
+      el.style.setProperty("--enter-ms", `${ENTER_MS()}ms`);
+      el.style.setProperty("--exit-ms", `${EXIT_MS()}ms`);
+      el.innerHTML = `
+        <div class="tint"></div>
+        <div class="inner">
+          <div class="meta">
+            <span class="badge">🔮 Fortune for <span class="uname">${sanitize(username)}</span></span>
+          </div>
+          <div class="text">${sanitize(fortune)}</div>
+        </div>
+        <div class="progress"><i></i></div>
+      `;
+      return el;
+    }
+
+    function spawnCard(info){
+      active = true;
+      const card = createCard(info);
+      stackEl.appendChild(card);
+
+      setTimeout(() => {
+        card.remove();
+        active = false;
+        setTimeout(pump, NEXT_DELAY());
+      }, CARD_LIFE_MS() + 40);
+    }
+
+    /********** CHAT **********/
+    function extractText(payload){
+      return payload?.comment ?? payload?.text ?? payload?.message ?? payload?.body ?? "";
+    }
+    function extractUser(payload){
+      return payload?.username ?? payload?.user ?? payload?.sender ?? payload?.name ?? payload?.author ?? "Viewer";
+    }
+    function hasCommand(textRaw){
+      const t = String(textRaw || "").toLowerCase();
+      return COMMANDS.some(c => t.includes(c));
+    }
+    function allowUser(username){
+      const now = Date.now();
+      const last = lastUse.get(username) || 0;
+      if (now - last < USER_COOLDOWN_MS) return false;
+      lastUse.set(username, now);
+      return true;
+    }
+
+    /********** SOCKET **********/
+    const socket = io(SOCKET_URL, { transports:["websocket"] });
+
+    socket.on("connect", () => {
+      statusEl.textContent = `✅ connected (${socket.id})`;
+      statusEl.classList.remove("err"); statusEl.classList.add("ok");
+    });
+    socket.on("disconnect", (r) => {
+      statusEl.textContent = `⚠️ disconnected: ${r}`;
+      statusEl.classList.remove("ok"); statusEl.classList.add("err");
+    });
+    socket.on("connect_error", (e) => {
+      statusEl.textContent = `❌ connect error: ${e?.message || e}`;
+      statusEl.classList.remove("ok"); statusEl.classList.add("err");
+    });
+
+    socket.on("message", (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      const { event, data } = payload;
+      if (String(event || "").toLowerCase() !== "chat") return;
+      onChat(data);
+    });
+    socket.on("chat", (data) => onChat(data));
+
+    function onChat(obj){
+      const text = extractText(obj);
+      if (!hasCommand(text)) return;
+
+      const username = extractUser(obj);
+      if (!allowUser(username)) return;
+
+      pushQueue({ username, fortune: pick(FORTUNES) });
+    }
+
+    /********** TEST **********/
+    window.addEventListener("keydown", (e)=>{
+      if ((e.key || "").toLowerCase() === "r"){
+        onChat({ username:"Tester", comment:"!ramalan dong" });
+      }
+    });
+  </script>
+</body>
+</html>
